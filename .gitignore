@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+*.log
+npm-debug.log*
