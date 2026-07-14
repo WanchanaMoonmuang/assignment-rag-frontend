@@ -25,15 +25,34 @@ function ExtractedContent({ source }: { source: Source }) {
   }
 
   const neighbors = [...detail.data.neighbors].sort((a, b) => a.chunk_index - b.chunk_index);
+  // Adjacent chunks are split with overlap for retrieval quality, so the start
+  // of a chunk often repeats the tail of the previous one; strip that before
+  // display. ponytail: naive char-level suffix/prefix match capped at 400
+  // chars; upgrade to a real diff if chunk_overlap ever exceeds that.
+  const displayItems = neighbors.reduce<{ neighbor: (typeof neighbors)[number]; displayContent: string }[]>(
+    (items, neighbor) => {
+      const previousContent = items.at(-1)?.neighbor.content ?? "";
+      return [...items, { neighbor, displayContent: stripLeadingOverlap(previousContent, neighbor.content) }];
+    },
+    [],
+  );
   return <Stack spacing={2}>
-    {neighbors.map((neighbor) => {
+    {displayItems.map(({ neighbor, displayContent }) => {
       const cited = neighbor.chunk_id === source.chunk_id;
-      const body = <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{neighbor.content}</ReactMarkdown>;
+      const body = <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{displayContent}</ReactMarkdown>;
       return cited
-        ? <Box key={neighbor.chunk_id} component="mark" aria-label="Cited passage" sx={{ display: "block", bgcolor: "action.hover", border: 1, borderColor: "primary.main", borderRadius: 1, p: 3, color: "text.primary" }}>{body}</Box>
+        ? <Box key={neighbor.chunk_id} component="mark" aria-label="Cited passage" sx={{ display: "block", bgcolor: "action.hover", borderLeft: 3, borderColor: "primary.main", color: "text.primary", px: 3, py: 2 }}>{body}</Box>
         : <Box key={neighbor.chunk_id} sx={{ color: "text.secondary", px: 1 }}>{body}</Box>;
     })}
   </Stack>;
+}
+
+function stripLeadingOverlap(previous: string, current: string): string {
+  const maxCheck = Math.min(previous.length, current.length, 400);
+  for (let length = maxCheck; length > 0; length--) {
+    if (previous.slice(-length) === current.slice(0, length)) return current.slice(length);
+  }
+  return current;
 }
 
 // Keyed by source.document_id from the caller so a new document mounts a fresh
@@ -85,7 +104,7 @@ export function SourceDrawer({ source, onClose }: { source: Source | null; onClo
     <Stack direction="row" sx={{ height: 64, px: 3, alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
       <Stack sx={{ minWidth: 0 }}>
         <Typography variant="h3" noWrap>{source?.document_name}</Typography>
-        <Typography variant="caption" color="text.secondary">{source ? `${source.location?.label ?? "Location unavailable"} · Score ${source.score.toFixed(3)}` : ""}</Typography>
+        <Typography variant="caption" color="text.secondary" noWrap title={source?.location?.label}>{source ? `${source.location?.label ?? "Location unavailable"} · Score ${source.score.toFixed(3)}` : ""}</Typography>
       </Stack>
       <IconButton aria-label="Close source" onClick={onClose}><CloseRounded /></IconButton>
     </Stack>

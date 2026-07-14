@@ -92,7 +92,11 @@ test("reopens a conversation and renders its persisted citation identically to a
   await page.route("**/api/documents/d1/chunks/k1", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify({ document_id: "d1", chunk: { chunk_id: "k1", content: "Refunds are processed within 30 days.", chunk_index: 1, location: { type: "line", start: 1, end: 1, label: "Lines 1-1" } }, neighbors: [] }),
+    body: JSON.stringify({
+      document_id: "d1",
+      chunk: { chunk_id: "k1", content: "Refunds are processed within 30 days.", chunk_index: 1, location: { type: "line", start: 1, end: 1, label: "Lines 1-1" } },
+      neighbors: [{ chunk_id: "k1", content: "Refunds are processed within 30 days.", chunk_index: 1, location: { type: "line", start: 1, end: 1, label: "Lines 1-1" } }],
+    }),
   }));
   await openAuthenticatedWorkspace(page);
 
@@ -104,6 +108,8 @@ test("reopens a conversation and renders its persisted citation identically to a
   // showing the exact location and score persisted with the message.
   await page.getByRole("button", { name: "[1]" }).click();
   await expect(page.getByLabel("Close source")).toBeVisible();
-  await expect(page.getByText("Lines 1-1 · Score 0.900")).toBeVisible();
+  // Scoped to the drawer subtitle specifically: the sources dropdown behind
+  // it shows the same "location · score" text for this single-source fixture.
+  await expect(page.locator('[title="Lines 1-1"]')).toHaveText("Lines 1-1 · Score 0.900");
   await expect(page.getByLabel("Cited passage")).toContainText("Refunds are processed within 30 days.");
 });
