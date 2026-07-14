@@ -230,6 +230,29 @@ question. Never automatically retry an ambiguous or in-stream failure.
   The blob URL is revoked when the drawer closes or a different source is
   opened.
 
+### Tool Activity (Calculator and Future Tools)
+
+- While streaming, the SSE `tool_call` (`{name, status:"requested"}`) and
+  `tool_result` (`{name, status, display_value}`) events render as a small
+  row above the answer text: a spinner while requested, then the resolved
+  value or a visible error once the result arrives. A `tool_result` always
+  resolves the most recent still-pending call, so multiple invocations in
+  one turn pair correctly with their own results in order.
+- Reopening a conversation renders the same activity from the persisted
+  `tool_activity` field (`{name, arguments, result}` or `{name, arguments,
+  error}`) through the identical row component — there is no separate
+  "restored" rendering path, so streamed and persisted activity look the
+  same by construction.
+- Tool activity is shown as soon as it arrives, independent of whether the
+  answer text has completed streaming — unlike citations, which wait for
+  the message to finish.
+- **The row is generic across whatever tools the backend exposes**, not
+  hardcoded to the calculator: the label is derived from the tool's `name`
+  (e.g. `calculator` → "Calculator", `weather_lookup` → "Weather lookup"),
+  and arguments are rendered as generic `key: value` pairs rather than
+  assuming a specific field like calculator's `expression`. A backend adding
+  a new tool needs no frontend change for its activity to display sensibly.
+
 ### Document Drawer
 
 - The drawer header contains title, refresh, and close icon buttons.
