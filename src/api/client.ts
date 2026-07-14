@@ -109,3 +109,27 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
+
+// For multipart uploads. No Content-Type is set so the browser attaches its own
+// boundary; auth injection and error handling otherwise match apiRequest.
+export async function apiRequestFormData<T>(path: string, formData: FormData): Promise<T> {
+  const requestHeaders = new Headers();
+  requestHeaders.set("Accept", "application/json");
+  const token = authHandlers.getToken();
+  if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: requestHeaders,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await parseApiError(response);
+    if (response.status === 401) handleUnauthorizedResponse();
+    throw error;
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}

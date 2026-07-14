@@ -219,20 +219,33 @@ question. Never automatically retry an ambiguous or in-stream failure.
 
 ### Document Ingestion
 
-- Use a segmented control for `Paste text` and `Upload .txt` modes.
+- Use a segmented control for `Paste text` and `Upload file` modes.
 - Paste mode includes document name and multiline content fields.
-- Upload mode accepts one `.txt` file, reads it in the browser, and defaults the
-  editable document name to the file name. Reject unsupported file types and
-  files above 1 MB before sending.
+- Upload mode accepts one file of any extension in `GET /api/config`'s
+  `supported_file_extensions` (txt, pdf, docx, csv, json) and defaults the
+  editable document name to the file name. The file itself is sent as-is
+  (multipart), never read into the content field. Reject an unsupported
+  extension or a file/pasted-text payload above `max_upload_bytes` (20 MiB)
+  before sending, using the live config values, not hardcoded ones.
 - Both modes include a generic key/value metadata editor. Rows have key, value,
   and remove controls, plus an add-row command. Keys must be non-empty and
-  unique; blank rows are omitted. Values are sent as strings.
-- Set metadata `source` to `plain_text` or `txt_upload` by default. If the user
-  adds a `source` row, its value overrides the default.
-- Submission sends JSON to `POST /ingest`, disables editing while pending, and
-  prevents duplicate submission.
-- On success, show document name and chunks created, clear the form, switch to
-  the document list, and refresh it. Preserve user input after failure.
+  unique; blank rows are omitted. Values are sent as strings. Metadata no
+  longer needs a `source` default — the backend worker sets the document's
+  `source` field itself (`plain_text` or `file_upload`) during finalization.
+- Submission starts a durable ingestion job (`POST /ingestions/text` or
+  `POST /ingestions/file`) and returns immediately once the job is accepted
+  (`202`); it does not wait for conversion/embedding to finish. The drawer and
+  its tabs stay fully interactive during processing — submitting does not
+  disable navigation, only the in-flight submission's own form fields.
+- After submission, the job is polled (`GET /ingestions/{job_id}`) and shown
+  in an "in progress" list above the document list, with its current stage
+  (`Converting`/`Extracting`/`Chunking`/`Embedding`/`Finalizing`) or a safe
+  failure message. Multiple jobs can be tracked concurrently — starting a
+  second ingestion does not interrupt or hide the first. A completed job
+  refreshes the document list; a terminal job (completed or failed) gets a
+  dismiss control once reviewed.
+- Preserve user input after a submission-request failure (e.g. a 4xx/5xx on
+  the initial `POST`, before a job exists).
 
 ## 6. Responsive Rules
 

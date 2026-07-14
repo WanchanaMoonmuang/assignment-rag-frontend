@@ -76,3 +76,78 @@ bugs (both pre-existing/environmental, confirmed via `git stash` and direct repr
   real e2e signal for this scope. None of the 4 specs touch Top K, so this doesn't change the
   Scope A verdict, but it means the "no regression to responsive layouts" claim is unverified by
   e2e this run (unit/component coverage stands in for it).
+
+## 2026-07-14 — Scope B: V2 durable job-queue ingestion (branch: feat/frontend-v2-ingestion, commit: 8ea5bdd)
+
+Reviewed as uncommitted working-tree changes on `feat/frontend-v2-ingestion` (base commit
+`8ea5bdd`, same as `feat/frontend-v2-foundations` — this scope's diff has not been committed yet).
+Diff verified via `git diff feat/frontend-v2-foundations...feat/frontend-v2-ingestion` (empty,
+no new commits) plus the actual uncommitted diff for the 6 changed files (`DESIGN.md`,
+`src/api/client.ts`, `src/documents/{types,api,DocumentsPanel,DocumentsPanel.test}.{ts,tsx}`) —
+matches the scope description. Cross-checked against the live backend source
+(`assignment-rag-backend/app/main.py`, `app/worker.py`, `app/settings.py`): `IngestionJob`
+field names/enum values (`status`: queued/processing/completed/failed; `stage`: queued/
+converting/extracting/chunking/embedding/finalizing/failed), the `/ingestions/text`,
+`/ingestions/file` (multipart, `file` + optional `metadata_json`), `/ingestions/{id}` routes,
+`max_upload_bytes` (20 MiB) and `supported_file_extensions` (txt/pdf/docx/csv/json) all match
+what the frontend now sends/expects. Confirmed the worker sets `document.source` to
+`plain_text`/`file_upload` itself (`app/worker.py:268,294`) — the frontend no longer fabricates
+a `source` default, matching the removed logic and updated `DESIGN.md` §5.
+
+Checks: lint pass (0 errors, 1 pre-existing warning — `ChatWorkspace.tsx` `react-hooks/exhaustive-deps`,
+Scope A, already triaged, not re-flagged), typecheck pass, vitest 28/28 passed, build pass,
+e2e 0/4 run (environment-blocked, same as Scope A — see below).
+
+Ran under Node v20.19.2 (nvm unavailable in this sandbox; `package.json` specifies `>=24 <25`) —
+same caveat as the Scope A run; results held (build + all 28 tests passed) but this is not a
+Node-24-verified run.
+
+No live backend was reachable at `http://localhost:8080/api` in this sandbox; per the task brief
+a separate live-backend integration pass (real login, real text-ingestion job, real multipart CSV
+upload, both polled to `completed`, both visible in the document list, cleaned up — 8/8 checks)
+was already run outside this session and is not re-verified here. This pass relies on the
+MSW-backed unit/component suite as the primary verification surface, as instructed.
+
+Working tree is clean this run: no stray untracked files or unexplained tracked-file edits
+appeared (unlike the Scope A run, where an unrelated "live" integration harness and an
+uncommitted `vite.config.ts` edit surfaced mid-review — flagged then, absent now, nothing to
+carry forward).
+
+The two pre-existing lint errors flagged in Scope A's QA pass (MUI `Tabs`/`ToggleButtonGroup`
+`onChange` handlers inferring `any` in `DocumentsPanel.tsx`; an `async () => "text"` mock with no
+`await` in `DocumentsPanel.test.tsx`) are confirmed gone — `npm run lint` now reports 0 errors.
+The rewrite typed the handlers explicitly (`(_event: SyntheticEvent, value: number)` for `Tabs`,
+`(_event: MouseEvent<HTMLElement>, value: Mode | null)` for `ToggleButtonGroup`) and the old V1
+text-upload mock no longer exists in the rewritten test file.
+
+### Test cases
+| ID | Scenario | Steps / interaction | Expected | Actual | Status |
+| -- | -------- | ------------------- | -------- | ------ | ------ |
+| FQA-010 | AC1: 5 supported formats selectable; unsupported extension rejected client-side, using live `supported_file_extensions` (not hardcoded) | `DocumentsPanel.test.tsx` "rejects an unsupported extension and an oversized file before sending": choose `policy.exe` | Inline alert "Unsupported file type...", no network call reaches `/ingestions/file` | Matched; message lists live config's extensions | PASS |
+| FQA-011 | AC2: oversized file rejected client-side before sending | Same test, choose a 20 MiB + 1 byte `.txt` file | Alert mentions the "20 MiB limit", no POST | Matched | PASS |
+| FQA-012 | AC2: oversized *pasted text* rejected client-side before sending | Scratch test (not committed): paste a 20 MiB + 1 byte string, submit | Alert mentions the "20 MiB limit"; no POST reaches `/ingestions/text` | Matched — `new TextEncoder().encode(trimmedContent).length > config.max_upload_bytes` (`DocumentsPanel.tsx:98`) correctly uses UTF-8 byte length, mirrors the backend's `content.encode("utf-8")` check in `app/main.py`; confirmed no POST fired | PASS |
+| FQA-013 | AC3: text-ingestion job stage is visible and updates live via polling to completion | `DocumentsPanel.test.tsx` "starts text ingestion, tracks the job to completion, and shows the document" | "queued for ingestion" notice, then "Completed" label once polling resolves; document appears in the list without a manual refresh/reopen | Matched | PASS |
+| FQA-014 | AC3: file-upload job shows live stage progression (queued→embedding→completed) | `DocumentsPanel.test.tsx` "uploads a file, shows live stage progression, and completes" (stateful mock, 2nd poll flips to completed) | "Embedding" shown mid-flight, then "Completed" | Matched | PASS |
+| FQA-015 | AC3: terminal job failure shows a safe, actionable message, not a raw error code/stack | `DocumentsPanel.test.tsx` "shows a safe error message for a job that fails" | Job's `error.message` ("Document could not be converted") shown, not `error.code` or a stack; dismiss (×) control appears and clears it | Matched | PASS |
+| FQA-016 | AC4: drawer/tabs remain usable during a job's processing; submitting one ingestion doesn't block starting another; multiple jobs trackable concurrently | `DocumentsPanel.test.tsx` "tracks multiple concurrent ingestion jobs without blocking further submissions" | Both "First" and "Second" jobs visible in the in-progress list simultaneously; navigating back to "Add document" tab mid-poll is not blocked | Matched; `Tabs`/`ToggleButtonGroup` no longer carry `disabled={pending}`, `Drawer`'s `onClose` is no longer gated on `pending` | PASS |
+| FQA-017 | AC5: metadata editor behavior unchanged (unique non-blank keys, values as strings) | Code diff review: `submit()`'s metadata validation block is byte-identical to the pre-Scope-B version | No behavior change | Confirmed via diff-identity, not a new test — appropriate proof for "unchanged" per AC5's wording | PASS |
+| FQA-018 | AC5: delete confirmation unchanged | `DocumentsPanel.test.tsx` "deletes a document and refreshes the list" | Confirm dialog, delete call, list refresh, success notice | Matched | PASS |
+| FQA-019 | Preserved input on submission-request failure (pre-202, before a job exists) | `DocumentsPanel.test.tsx` "preserves user input after ingestion failure" | 502 on `POST /ingestions/text` shows alert with server message, name/content fields retain user input | Matched | PASS |
+| FQA-020 | Multipart request omits `Content-Type` (browser sets boundary) and reuses `apiRequest`'s auth/error handling | Code review of `apiRequestFormData` (`src/api/client.ts`) | No explicit `Content-Type` header set; `Authorization` bearer header attached when a token exists; `parseApiError`/`handleUnauthorizedResponse` reused on non-OK / 401 | Matched | PASS |
+| FQA-021 | `npm run test:e2e` (Playwright, `e2e/workspace-layout.spec.ts`, incl. `opens the documents panel` which directly touches this scope's rewrite) | `npx playwright test` | 4 specs run against dev server | Browser launch fails: "Host system is missing dependencies to run browsers" (`sudo npx playwright install-deps` required, no sudo in this sandbox) — same environment block as Scope A | BLOCKED (environment, not a product bug) |
+
+### Bugs
+No new bugs found in this scope's diff. One coverage note, not filed as a bug (nothing broken):
+
+- **Multipart error/401 path has no dedicated unit test (informational, not filed as BUG-F-###)** —
+  `apiRequestFormData` (`src/api/client.ts`) is only exercised via the happy-path 202 response in
+  `DocumentsPanel.test.tsx`'s file-upload test; there's no MSW case forcing a non-2xx or 401 on
+  `POST /ingestions/file` to confirm `parseApiError`/`handleUnauthorizedResponse` fire correctly
+  for the multipart path specifically (the JSON `apiRequest` path already has 401 coverage
+  elsewhere). Code review shows the logic is identical to the already-tested JSON path, so this
+  is a coverage gap, not a defect — worth a follow-up test if this helper grows more call sites.
+- **Playwright e2e still blocked in this sandbox** — same missing OS-level shared libraries
+  (`libnspr4`, `libnss3`, etc.) as Scope A, no `sudo` available. This time it's more load-bearing:
+  `workspace-layout.spec.ts:40` ("opens the documents panel") directly exercises the rewritten
+  drawer and would have been the most relevant e2e signal for this scope's responsive behavior.
+  Unit/component coverage (FQA-010 through FQA-020) stands in for it this run.
