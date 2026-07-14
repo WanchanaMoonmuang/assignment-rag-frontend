@@ -243,3 +243,96 @@ No new bugs found in this scope's diff. Two coverage notes, not filed as bugs (n
   exists yet (`e2e/` only has `workspace-layout.spec.ts`, unrelated to this scope), so this block
   has no incremental impact on Scope C's own coverage beyond the pre-existing gap already logged
   in Scope B.
+
+## 2026-07-14 — Scope D: calculator tool-activity visualization (branch: feat/frontend-v2-calculator, commit: 8fb9ec8 + working tree)
+
+Reviewed as uncommitted working-tree changes on `feat/frontend-v2-calculator`, stacked on Scope C
+(`8fb9ec8`, `feat/frontend-v2-citations`, already PR'd). Diff verified via `git diff
+feat/frontend-v2-citations -- DESIGN.md src/chat/ChatWorkspace.test.tsx src/chat/ChatWorkspace.tsx`
+(only these 3 files changed; `src/chat/types.ts`/`src/chat/api.ts` already carried the
+`ToolActivity` type and `tool_call`/`tool_result` SSE plumbing from an earlier scope, unchanged
+here).
+
+Environment note: Node 24 is required (`.nvmrc`) but only Node 20.19.2 is installed in this
+sandbox and no `nvm`/Node 24 binary is available — all checks below ran on Node 20. `npm run
+lint`/`typecheck`/`test`/`build` invoked via `rtk proxy` because the `npm`-rewriting hook otherwise
+swallowed ESLint's plain-text output ("JSON parse failed"); this is a sandbox/tooling artifact, not
+a product issue.
+
+Checks: lint pass (1 pre-existing warning only, see below), typecheck pass, vitest 52/52 passed,
+build pass, e2e 0/4 passed (environment-blocked, same as every prior scope — see notes).
+
+### Run notes
+
+- The lone lint warning (`react-hooks/exhaustive-deps` on the `messages` useEffect dependency in
+  `ChatWorkspace.tsx`) is the same pre-existing warning triaged in Scope A — confirmed by stashing
+  this scope's diff and re-running `lint` against bare `feat/frontend-v2-citations`: identical
+  warning, just at line 39 instead of line 72 (line shift only, from the code this scope inserted
+  above it). Zero new lint issues.
+- Verified the forward-compatibility claim (AC5) by reading the code, not just running the two
+  hypothetical-tool tests: `grep -n "calculator" src/chat/ChatWorkspace.tsx` returns exactly one
+  hit, a comment (`// specific tool name or argument shape (e.g. calculator's "expression")`, line
+  21) — no calculator-specific branch, string literal, or lookup table anywhere in
+  `toolLabel`/`formatToolArguments`/`ToolActivityRow`/`resolveToolActivity`. The two new tests
+  (`weather_lookup` streamed, `customer_lookup` persisted with `{customer_id: number, active:
+  boolean}` args and an `error` field) are genuinely exercising the generic path, not tautological:
+  they never touch a calculator fixture and assert real rendered DOM text derived purely from
+  `name`/`arguments`/`result`/`error`.
+- Verified `resolveToolActivity`'s "merge into the last still-`requested` entry" pairing strategy
+  (AC4) against the real backend, not just the MSW mocks: `assignment-rag-backend/app/rag.py`
+  `stream_with_calculator` (lines 306-317) yields `tool_call` then `tool_result` inside the same
+  `for function_call in function_calls:` iteration, i.e. genuinely alternating per call even when
+  Gemini returns multiple function calls in one response — so the frontend's "last `requested`"
+  assumption holds against the actual backend contract, not just against the test fixtures. This
+  is documented in a source comment in `ChatWorkspace.tsx` (line 60-62) and is accurate.
+- Found one real gap in the forward-compatibility claim — filed as BUG-F-001 below. It does not
+  affect the calculator (whose `result` is always numeric) or the live-streaming path (the backend
+  always sends `display_value`); it only affects the **persisted/reopened** path for a hypothetical
+  future tool whose raw `result` is a boolean (or `null`), where `display_value` isn't stored.
+  Reproduced with a scratch test (added, run, then reverted — restored file confirmed byte-identical
+  via `diff` before the final `npm test` re-run) rather than reported from reasoning alone.
+
+### Test cases
+| ID | Scenario | Steps / interaction | Expected | Actual | Status |
+| -- | -------- | ------------------- | -------- | ------ | ------ |
+| FQA-042 (AC1) | Calculator activity shows pending spinner then resolves with the correct value alongside the final answer | `ChatWorkspace.test.tsx` "shows calculator tool activity while streaming, then the resolved result" | `tool_call` (requested) → `tool_result` (`display_value: "4183"`) → token → done; "Calculator: 4183" and the answer text both appear | Matched | PASS |
+| FQA-043 (AC2) | Invalid/failing expression shows a controlled, visible error, not a raw exception | `ChatWorkspace.test.tsx` "shows a controlled error for an invalid calculator expression" | `tool_result` with `status: "failed"` renders "Calculator error: ..." | Matched | PASS |
+| FQA-044 (AC4) | Multiple sequential calculator calls in one turn each pair with their own result | `ChatWorkspace.test.tsx` "pairs multiple calculator calls in one turn with their own results" | call1→result1(10), call2→result2(20); both "Calculator: 10" and "Calculator: 20" render, not cross-contaminated | Matched | PASS |
+| FQA-045 (AC3) | Reopening a conversation restores tool activity through the identical component as live streaming | `ChatWorkspace.test.tsx` "restores persisted tool activity identically after reopening a conversation" | Persisted `tool_activity: [{name, arguments:{expression}, result:4183}]` (no `status`/`display_value`) renders "Calculator (expression: 47*89): 4183" | Matched | PASS |
+| FQA-046 (AC5) | A completely novel tool name (`weather_lookup`, never seen elsewhere in the codebase) streams and renders sensibly with zero calculator-specific code | `ChatWorkspace.test.tsx` "renders a hypothetical future tool it has never seen before..." | "Weather lookup: 72F, clear" | Matched | PASS |
+| FQA-047 (AC5) | A novel tool's persisted activity with an unrelated argument shape (`{customer_id: number, active: boolean}`) and an `error` field renders generically | `ChatWorkspace.test.tsx` "renders a hypothetical future tool's persisted activity with unrelated argument shapes generically" | "Customer lookup error: Customer not found" | Matched | PASS |
+| FQA-048 (AC5) | No calculator-specific branch/string anywhere in the display logic | `grep -n "calculator" src/chat/ChatWorkspace.tsx` | Only match is an explanatory code comment; zero matches inside `toolLabel`/`formatToolArguments`/`ToolActivityRow`/`resolveToolActivity` | Matched | PASS |
+| FQA-049 (AC4) | Tool-call/tool-result pairing strategy is valid against the real backend stream shape, not just MSW fixtures | Code review of `assignment-rag-backend/app/rag.py` `stream_with_calculator` (lines 306-317) | `tool_call`/`tool_result` genuinely alternate per function call, even for multiple calls in one Gemini response | Matched | PASS |
+| FQA-050 | Persisted boolean (or null) tool `result` with no stored `display_value` renders a value | Scratch test (added, run, reverted): persisted `tool_activity: [{name: "availability_check", arguments: {sku: "X1"}, result: true}]` | Expected something like "Availability check: true" | Rendered "Availability check (sku: X1): " (value silently blank) — see BUG-F-001 | FAIL |
+| FQA-051 | `npm run build` succeeds; no new TypeScript errors from this scope's diff | `npm run build` (Node 20, `.nvmrc` wants 24 — unavailable in sandbox) | Build succeeds | Succeeded (pre-existing 500kB chunk-size warning only, unrelated to this scope) | PASS |
+| FQA-052 | `npm run test:e2e` | Playwright, `e2e/workspace-layout.spec.ts` (unrelated to this scope; no calculator e2e spec exists) | N/A | 0/4 run — `browserType.launch` fails, missing OS shared libs (`libnspr4`, `libnss3`, etc.), no `sudo` in sandbox; same pre-existing block as every prior scope | N/A (environment-blocked) |
+
+### Bugs
+- **BUG-F-001** (severity: low, status: open) — persisted tool activity with a boolean (or `null`)
+  `result` renders with a silently blank value, breaking the "streamed and persisted activity look
+  the same by construction" claim (AC3/AC5) for such a future tool.
+  - Repro: scratch test, not present in the committed test file (added temporarily to
+    `ChatWorkspace.test.tsx`, run, then reverted — restored file verified byte-identical via `diff`
+    against the pre-edit copy, and the full 52/52 suite re-confirmed green afterward). Persisted
+    `tool_activity: [{ name: "availability_check", arguments: { sku: "X1" }, result: true }]`
+    (no `status`, no `display_value` — matches the real persisted shape per `DESIGN.md`'s
+    `{name, arguments, result}`).
+  - Observed: rendered text is `"Availability check (sku: X1): "` — trailing blank where a value
+    (e.g. `"true"`) should be. Expected `"Availability check: true"` or similar.
+  - Suspected root cause: `src/chat/ChatWorkspace.tsx:37` —
+    `const value = activity.display_value ?? (typeof activity.result === "number" ||
+    typeof activity.result === "string" ? String(activity.result) : undefined);` — the allowlist
+    is missing `"boolean"`. This is an internal inconsistency, not a one-off: `formatToolArguments`
+    two lines up (line ~26) already uses the correct three-way allowlist
+    (`["string", "number", "boolean"].includes(typeof entry[1])`) for the exact same
+    stringify-safety problem; the `value` line just forgot to match it. The narrow fix is adding
+    `"boolean"` to this line's condition, not switching to `typeof result !== "object"` (which
+    would also let `undefined` through and render the literal string `"undefined"`).
+  - Scope: does not affect the shipped calculator (its `result` is always numeric) or any
+    live-streaming case (the backend always populates `display_value` per
+    `app/rag.py:stream_with_calculator`, so `??` short-circuits before the narrowing ever runs).
+    Only reachable via a future tool whose persisted `result` is a boolean/null with no
+    `display_value` stored — currently hypothetical, hence low severity. All 6 shipped
+    acceptance criteria (AC1-AC4, and AC5 for the two tested hypothetical tools whose results are
+    string/number) pass.
+  - Fix / re-verified: pending.
