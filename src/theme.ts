@@ -57,7 +57,13 @@ export const theme = createTheme({
       styleOverrides: { root: { minHeight: 40 } },
     },
     MuiIconButton: {
-      styleOverrides: { root: { width: 40, height: 40 } },
+      styleOverrides: {
+        root: ({ theme }) => ({
+          width: 40,
+          height: 40,
+          [theme.breakpoints.down("sm")]: { width: 44, height: 44 },
+        }),
+      },
     },
     MuiTextField: {
       defaultProps: { variant: "outlined" },

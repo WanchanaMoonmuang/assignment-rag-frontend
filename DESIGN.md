@@ -46,8 +46,11 @@ separate pages.
 
 - The conversation sidebar is persistent at wide desktop sizes.
 - The center chat column owns the remaining width and must remain readable when
-  the document drawer opens.
-- Document management opens in a right-side slide-over drawer.
+  the document drawer or source drawer opens.
+- Document management and citation/source inspection each open in their own
+  right-side slide-over drawer (only one is meaningfully in use at a time).
+- The composer area includes the Top K slider, initialized from backend
+  runtime configuration.
 - The top bar contains the current conversation title, document drawer action,
   and account menu with logout.
 - Do not place the workspace sections inside decorative cards.
@@ -358,17 +361,25 @@ Every asynchronous surface must implement the applicable states below:
 - A user can create, select, continue, and delete conversations with clear state
   at every step.
 - Streamed Markdown renders progressively without unsafe HTML or page overflow.
-- Source disclosures appear only after completion and show document name plus
-  text excerpt; no unsupported page number is shown.
+- Inline citation markers and the source disclosure list both appear only once
+  the message has finished (not mid-stream) and open the same source drawer;
+  the drawer shows the backend's actual location label (page, line range,
+  data rows, section, or record) rather than a hardcoded "no page" assumption.
 - A failed stream preserves partial content and offers manual resend without an
   automatic duplicate message.
-- A user can ingest pasted text or one `.txt` file with editable generic metadata
-  and see the resulting chunk count.
+- A user can ingest pasted text or upload a file in any backend-supported
+  format (txt/pdf/docx/csv/json) with editable generic metadata, see its
+  ingestion job progress through to completion, and see the resulting
+  document in the list.
 - A user can refresh and delete documents through the drawer.
 - Destructive document and conversation actions require confirmation.
+- Calculator tool activity is visible while streaming and identical when a
+  conversation is reopened, for the calculator and for any future tool the
+  backend adds.
 - The workspace remains usable by keyboard and at 375, 768, 1024, and 1440px
   without incoherent overlap or page-level horizontal scrolling.
-- Automated tests cover login, session expiry, conversation workflows, SSE event
-  parsing, Markdown safety, citations, ingestion validation, metadata behavior,
-  document deletion, and responsive drawer behavior.
+- Automated tests cover login, session expiry, conversation workflows, SSE
+  event parsing, Markdown safety, citations, source inspection, tool activity,
+  ingestion validation, job polling, metadata behavior, document deletion, and
+  responsive drawer behavior.
 

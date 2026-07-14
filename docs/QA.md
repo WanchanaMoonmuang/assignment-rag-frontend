@@ -336,3 +336,193 @@ build pass, e2e 0/4 passed (environment-blocked, same as every prior scope — s
     acceptance criteria (AC1-AC4, and AC5 for the two tested hypothetical tools whose results are
     string/number) pass.
   - Fix / re-verified: pending.
+
+## 2026-07-14 — Scope E: docs, a11y/responsive polish, full regression (branch: feat/frontend-v2-polish, commit: 38db717 + working tree)
+
+Final scope of the V2 frontend effort. Reviewed as uncommitted working-tree changes on
+`feat/frontend-v2-polish`, stacked on Scope D (`38db717`, `feat/frontend-v2-calculator`, already
+PR'd — HEAD of this branch is identical to `38db717`, so `git diff` with no args is this scope's
+full diff). No new product feature; scope is `README.md`/`DESIGN.md` corrections, a responsive
+touch-target fix in `src/theme.ts`, a dialog-initial-focus fix in two delete-confirmation dialogs,
+and new/extracted e2e coverage.
+
+Environment note: Node 24 is required (`.nvmrc`) but only Node 20.19.2 is installed and no
+`nvm`/Node 24 binary is available — same as every prior scope. `lint`/`typecheck`/`test`/`build`
+run via `rtk proxy npm ...` because the `npm`-rewriting hook swallows ESLint's plain-text output.
+
+Checks: lint **FAIL** (1 warning, `--max-warnings=0`; pre-existing, not introduced by this scope's
+diff — see BUG-F-002), typecheck pass, vitest 54/54 passed, build pass, e2e 0/7 executed
+(environment-blocked — actually attempted, not assumed; see notes).
+
+### Run notes
+
+- **Diff scope confirmed exactly as described.** `git diff --stat` (no args, since this branch has
+  no commits yet) shows exactly `DESIGN.md`, `README.md`, `e2e/workspace-layout.spec.ts`,
+  `src/chat/ChatWorkspace.{tsx,test.tsx}`, `src/documents/DocumentsPanel.{tsx,test.tsx}`,
+  `src/theme.ts` modified, plus new `e2e/chat-and-documents.spec.ts`, `e2e/helpers.ts`,
+  `src/theme.test.tsx`. `src/theme.ts`'s only change is the `MuiIconButton` `styleOverrides.root`
+  becoming a responsive function; `ChatWorkspace.tsx`/`DocumentsPanel.tsx`'s only changes are each
+  adding `autoFocus` to their dialog's Cancel button — matches the described scope with no
+  surprises.
+- **`theme.test.tsx` is a genuine (non-tautological) check.** Stashed `src/theme.ts` alone,
+  re-ran the test: it fails (`expected null not to be null`) against the pre-fix flat
+  `{width:40,height:40}` styleOverrides — no `@media (max-width:599.95px)` rule is emitted for
+  `MuiIconButton` at all without the breakpoint override. Restored via `git stash pop` and
+  re-confirmed 54/54 green. Given jsdom does not evaluate media queries or apply responsive layout,
+  asserting on the emitted `<style>` CSS text for the media-query rule is the correct/only feasible
+  way to verify this fix in this test environment — a rendered-size assertion would be a false
+  read (jsdom's layout box wouldn't reflect a real mobile viewport regardless of the CSS).
+- **Both dialog-focus tests are genuine (non-tautological), not just correctly timed.** Initially
+  verified only that the `toHaveFocus()` assertion fires immediately after the dialog opens (before
+  any Tab/click) — necessary but not sufficient, since MUI's default focus-trap could plausibly
+  focus the first tabbable element (which happens to be Cancel) even without `autoFocus`, making
+  the test pass regardless of the fix. Closed this gap by stashing both `ChatWorkspace.tsx` and
+  `DocumentsPanel.tsx` (removing only the `autoFocus` change) and re-running both test files:
+  **both fail** without the fix. The rendered dialog DOM confirms why — without `autoFocus`, MUI's
+  Modal focuses the dialog root `<div role="dialog" tabindex="-1">` (the Paper), not the Cancel
+  button, exactly matching the reported bug ("focuses the dialog's root container ... only
+  reachable via an extra Tab press"). Restored via `git stash pop`; re-confirmed 54/54 green.
+- **`README.md`/`DESIGN.md` factual claims cross-checked against real component source**, not just
+  read as prose: the "Original" PDF tab and `#page=N` viewer (`src/citations/SourceDrawer.tsx`),
+  the generic (non-calculator-hardcoded) tool-activity rendering (`toolLabel`/
+  `formatToolArguments`/`ToolActivityRow` in `src/chat/ChatWorkspace.tsx`), and the multi-format
+  upload/job-stage-polling behavior (`src/documents/DocumentsPanel.tsx`) all match what's
+  described. Re-read the full current `DESIGN.md` (not just the diff) end to end for internal
+  consistency: §3's desktop diagram bullets, §5's Citations/Tool Activity/Document Ingestion
+  subsections, §7 Accessibility, and §10 Acceptance Criteria are all now mutually consistent with
+  each other and with the actual Scope B/C/D shipped behavior — no remaining "no page number" or
+  "one `.txt` file" language anywhere in the file.
+- **New `e2e/chat-and-documents.spec.ts` reviewed line-by-line against real component output**
+  (selectors, mocked routes, and assertions), since it could not be executed here (see below):
+  - Test 1 (`Home` key on the Top K slider → `top_k: 0` in the POST body → sources render): the
+    slider's accessible name comes from `aria-labelledby` pointing at text `Retrieved chunks (Top
+    K): N` (`ChatWorkspace.tsx`'s `TopKControl`), so `getByRole("slider", { name: /Retrieved
+    chunks/ })` genuinely matches; `Home` is standard MUI/ARIA slider behavior for "jump to min".
+    Sound.
+  - Test 2 (file upload → job stage progression): `getByRole("button", { name: "Upload file" })`
+    matches the `ToggleButton` (renders as a real `<button>`); the notice text
+    `"notes.txt queued for ingestion."` and stage labels `"Embedding"`/`"Completed"` match
+    `DocumentsPanel.tsx`'s `onSuccess` notice string and `STAGE_LABELS`/status branch exactly.
+    Sound.
+  - Test 3 (reopen persisted citation → same source drawer, same location/score): `getByRole
+    ("button", { name: "[1]" })` matches the inline citation link renderer (confirmed identically
+    used and passing in the existing unit test at `ChatWorkspace.test.tsx:39`); `"Lines 1-1 · Score
+    0.900"` matches `SourceDrawer.tsx`'s caption template (`location.label` + `` · Score ``
+    + `score.toFixed(3)`) for `score: 0.9`; `getByLabel("Cited passage")` and `getByLabel("Close
+    source")` both exist verbatim as `aria-label`s in `SourceDrawer.tsx`. Sound.
+  - `e2e/helpers.ts`'s extracted `openAuthenticatedWorkspace` is byte-identical in behavior to the
+    inline version it replaced in `workspace-layout.spec.ts` (diff is purely the extraction), and
+    its `sessionStorage` key (`knowledge-assistant.access-token`) matches `src/auth/storage.ts`'s
+    `ACCESS_TOKEN_KEY` exactly.
+- **Playwright was genuinely attempted, not assumed blocked.** Chromium was already installed
+  (`~/.cache/ms-playwright/chromium-1228`); `npx playwright test` (both the new spec alone and the
+  full `e2e/` suite, 7 tests total across both spec files) launched and failed identically every
+  time with `browserType.launch: Host system is missing dependencies ... sudo npx playwright
+  install-deps` — no `sudo` binary exists in this sandbox, so the deps cannot be installed. Same
+  environment block as every prior scope in this project; not a product defect.
+- **Re-verified BUG-F-001 (filed in the Scope D entry above) — now fixed.** Reading the current
+  `src/chat/ChatWorkspace.tsx:37`, the `value` allowlist is
+  `["number", "string", "boolean"].includes(typeof activity.result)` — `"boolean"` is present.
+  `git show 8fb9ec8:src/chat/ChatWorkspace.tsx` (Scope C, pre-calculator) has no such line, and
+  `git show 38db717:...` (Scope D's actual commit) already contains the three-way allowlist — so
+  the fix landed in Scope D's commit itself; the Scope D QA entry was simply never updated to
+  reflect it (the commit happened after that QA pass, or the fix was applied post-hoc before
+  commit). This scope's diff does not touch this line at all. Re-verified empirically with a
+  scratch test (added to `ChatWorkspace.test.tsx`, run, then removed — diff confirmed to return to
+  exactly the pre-existing single-line `autoFocus` change via `git diff --stat` before the final
+  `npm test` re-run): persisted `tool_activity: [{ name: "availability_check", arguments: { sku:
+  "X1" }, result: true }]` now renders `"Availability check (sku: X1): true"` as expected.
+- **New lint failure found — filed as BUG-F-002.** `npm run lint` (`eslint . --max-warnings=0`)
+  currently exits non-zero on this branch: 1 warning, "ESLint found too many warnings (maximum:
+  0)." Confirmed this is **not introduced by Scope E's diff**: stashed all of this scope's tracked
+  changes (`DESIGN.md`, `README.md`, `e2e/workspace-layout.spec.ts`,
+  `src/chat/ChatWorkspace.{tsx,test.tsx}`, `src/documents/DocumentsPanel.{tsx,test.tsx}`,
+  `src/theme.ts` — the new untracked files don't participate in lint output either way) and
+  re-ran lint directly against the `38db717` baseline: identical single warning, same file/line.
+  This is the same `react-hooks/exhaustive-deps` warning already noted as pre-existing in the
+  Scope A and Scope D entries above — but neither of those entries flagged that it makes `npm run
+  lint` itself **fail** the `--max-warnings=0` gate; Scope D's entry mislabeled it "lint pass (1
+  pre-existing warning)". Since PRDv2 §11.4 requires "frontend tests and production build pass"
+  and this repo's own documented command is `--max-warnings=0`, a currently-failing `npm run lint`
+  is a real regression-suite gap this "full regression" scope should have caught and fixed, not
+  just carried forward as a footnote. Filed as a tracked bug rather than another buried note.
+
+### Test cases
+| ID | Scenario | Steps / interaction | Expected | Actual | Status |
+| -- | -------- | ------------------- | -------- | ------ | ------ |
+| FQA-053 | IconButton reaches 44x44px touch target on mobile viewports | `theme.test.tsx`, inspect emitted `<style>` text | `@media (max-width:599.95px)` rule containing `44px` twice | Present | PASS |
+| FQA-054 | Same test fails without the fix (discriminating-test check) | Stash `src/theme.ts`, re-run `theme.test.tsx` | Test fails (no such rule emitted) | Failed as expected (`expected null not to be null`) | PASS (regression confirmed) |
+| FQA-055 | Conversation-delete dialog focuses Cancel on open | `ChatWorkspace.test.tsx` "confirms and completes conversation deletion" | `toHaveFocus()` on Cancel immediately after dialog opens | Matched | PASS |
+| FQA-056 | Same test fails without `autoFocus` (discriminating-test check) | Stash `autoFocus` change in `ChatWorkspace.tsx`, re-run | Test fails; dialog root (Paper, `tabindex="-1"`) holds focus instead | Failed as expected | PASS (regression confirmed) |
+| FQA-057 | Document-delete dialog focuses Cancel on open | `DocumentsPanel.test.tsx` "deletes a document and refreshes the list" | `toHaveFocus()` on Cancel immediately after dialog opens | Matched | PASS |
+| FQA-058 | Same test fails without `autoFocus` (discriminating-test check) | Stash `autoFocus` change in `DocumentsPanel.tsx`, re-run | Test fails | Failed as expected | PASS (regression confirmed) |
+| FQA-059 | README "Current Scope" reflects actual V2 feature set | Read `README.md`, cross-check Top K/citations/PDF-Original/calculator/job-queue claims against source | Matches `TopKControl`, `SourceDrawer`, `ChatWorkspace` tool activity, `DocumentsPanel` ingestion | Matched | PASS |
+| FQA-060 | DESIGN.md §10 Acceptance Criteria no longer contradicts Scope C (page numbers) or Scope B (multi-format upload) | Read current `DESIGN.md` §5/§7/§10 end to end | Internally consistent, no stale "no page number"/".txt only" language remains | Matched | PASS |
+| FQA-061 | New e2e spec's Top K slider selector/assertions match real component | Code review: `TopKControl` accessible name, `Home` key semantics, POST body shape | `getByRole("slider", {name: /Retrieved chunks/})` and `top_k: 0` assertion both sound | Matched | PASS |
+| FQA-062 | New e2e spec's upload/job-polling selectors/assertions match real component | Code review: `ToggleButton` roles, notice string, `STAGE_LABELS` | All strings/roles match `DocumentsPanel.tsx` exactly | Matched | PASS |
+| FQA-063 | New e2e spec's citation-reopen selectors/assertions match real component | Code review: `[1]` citation button, `SourceDrawer` caption template, aria-labels | All match `ChatWorkspace.tsx`/`SourceDrawer.tsx` exactly | Matched | PASS |
+| FQA-064 | BUG-F-001 (persisted boolean tool result renders blank) re-verification | Scratch test (added, run, reverted): persisted `result: true` | Renders `"Availability check (sku: X1): true"` | Matched — fixed | PASS |
+| FQA-065 | `npm run lint` passes cleanly | `rtk proxy npm run lint` | Exit 0, no warnings | Exit non-zero, 1 warning (`react-hooks/exhaustive-deps`, `ChatWorkspace.tsx:72`) — pre-existing, not from this scope's diff (confirmed by stashing this scope's changes and re-running against `38db717`) | FAIL — see BUG-F-002 |
+| FQA-066 | `npm run typecheck` passes | `rtk proxy npm run typecheck` | Exit 0, no errors | Clean | PASS |
+| FQA-067 | `npm test` (vitest) passes at the expected count | `rtk proxy npm test` | 54/54 (53 + 1 new `theme.test.tsx`, dialog-focus assertions added to existing tests) | 8 files, 54/54 passed | PASS |
+| FQA-068 | `npm run build` succeeds | `rtk proxy npm run build` | Build succeeds | Succeeded (pre-existing >500kB chunk-size warning only, unrelated to this scope) | PASS |
+| FQA-069 | `npm run test:e2e` (full suite, both spec files) actually attempted | `npx playwright test` (7 tests: 4 `workspace-layout.spec.ts` + 3 new `chat-and-documents.spec.ts`) | Run or a clear environment block | 0/7 run — `browserType.launch` fails, missing OS shared libs (`libnspr4`, `libnss3`, etc.), no `sudo` binary in this sandbox to install them; genuinely attempted (Chromium binary was already present), same pre-existing block as every prior scope | N/A (environment-blocked) |
+
+### Bugs
+- **BUG-F-001** (severity: low, status: **fixed**) — persisted tool activity with a boolean (or
+  `null`) `result` renders with a silently blank value (originally filed in the Scope D entry
+  above).
+  - Re-verification: `src/chat/ChatWorkspace.tsx:37`'s allowlist now includes `"boolean"`
+    (`["number", "string", "boolean"].includes(typeof activity.result)`). The fix is present in
+    commit `38db717` (Scope D's own commit, which is this branch's unchanged base) — **not** part
+    of Scope E's diff; the Scope D QA entry's "status: open" was simply never updated after the
+    fix landed. Confirmed via a scratch test (added, run, reverted): persisted `tool_activity:
+    [{ name: "availability_check", arguments: { sku: "X1" }, result: true }]` now renders
+    `"Availability check (sku: X1): true"`.
+  - Fix / re-verified: commit `38db717` (already merged/PR'd as part of Scope D); re-verified in
+    this Scope E QA pass.
+- **BUG-F-002** (severity: medium, status: open) — `npm run lint` (`eslint . --max-warnings=0`)
+  currently fails on this branch.
+  - Repro: `rtk proxy npm run lint` (or `npm run lint` directly, outside this sandbox's
+    npm-output-swallowing hook).
+  - Observed: `react-hooks/exhaustive-deps` warning at `src/chat/ChatWorkspace.tsx:72` ("The
+    'messages' logical expression could make the dependencies of useEffect Hook (at line 73)
+    change on every render...") → `✖ 1 problem (0 errors, 1 warning)` → `ESLint found too many
+    warnings (maximum: 0)` → non-zero exit.
+  - Suspected root cause: `src/chat/ChatWorkspace.tsx:72` derives `messages` inline every render
+    (`const messages = localMessages ?? history.data?.messages ?? [];`) — the `?? []` fallback is
+    a fresh array reference whenever both operands are nullish, which the second `useEffect` at
+    line 73 (`useEffect(..., [messages])`, the auto-scroll effect) depends on directly. ESLint
+    correctly flags that this dependency isn't stable across renders in the way `exhaustive-deps`
+    expects; the documented fix is wrapping `messages` in its own `useMemo`.
+  - Scope: pre-existing since at least Scope A (noted in that entry and in Scope D's, both of
+    which under-labeled it "lint pass (1 pre-existing warning)" instead of a failing gate).
+    Confirmed **not introduced by Scope E's diff**: stashed all of Scope E's tracked changes and
+    re-ran lint against bare `38db717` — identical single warning. Raising severity to a tracked
+    bug (rather than a recurring footnote) because Scope E's explicit remit is "full regression"
+    before the V2 effort closes, and PRDv2 §11.4 requires frontend tests/build to pass cleanly as
+    part of the release bar — a failing `npm run lint` should not ship un-tracked.
+  - Fix / re-verified: pending — recommend wrapping `messages` in `useMemo(() => localMessages ??
+    history.data?.messages ?? [], [localMessages, history.data])` in `src/chat/ChatWorkspace.tsx`
+    (hand back to the main agent; QA does not implement feature/lint fixes).
+
+### PRDv2 §11.3/§11.4 status across all five scopes (frontend side only)
+Read `docs/PRDv2.md` §11.3 (Citations and Tools) and §11.4 (Operations and Compatibility) before
+making this call, rather than from memory:
+- §11.3: all frontend-observable bullets are satisfied — citations persist unchanged on reopen,
+  clicking opens the correct location/score/highlighted chunk, PDF citations open the original at
+  the cited page, extracted markup is sanitized (pre-existing `rehype-sanitize` pipeline, unchanged
+  this scope), and calculator activity streams, resolves, rejects unsafe input, and survives
+  reload (BUG-F-001 now closed). The cross-provider (Gemini Developer API / Vertex AI) bullet is a
+  backend concern, out of frontend QA's scope.
+- §11.4: "frontend tests and production build pass" — **tests and build both pass** (54/54,
+  clean build), but **lint currently does not** (BUG-F-002) if lint is read as part of that bar;
+  the desktop/mobile browser-test bullet (upload progress, chat streaming, conversation reload,
+  citation inspection) has matching Playwright coverage written and logic-reviewed but **never
+  actually executed** in this sandbox across any scope of this project (confirmed genuinely
+  attempted, not assumed, this session) — that's a real residual gap for whoever signs off V2
+  outside this sandbox. Backend-side §11.4 bullets (structured logs, curl scenarios, backend
+  tests/lint) are outside this agent's remit.
+- **Net: do not call frontend V2 fully green.** Two concrete asterisks remain at the close of
+  Scope E: BUG-F-002 (lint fails) and the never-executed e2e suite (environment-blocked, not
+  logic-blocked).

@@ -116,6 +116,7 @@ describe("DocumentsPanel", () => {
     const user = userEvent.setup();
     renderApp(<DocumentsPanel open onClose={() => undefined} />);
     await user.click(await screen.findByLabelText("Delete Policy"));
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByLabelText("Delete Policy")).not.toBeInTheDocument());
     expect(screen.getByText("Document deleted.")).toBeInTheDocument();
