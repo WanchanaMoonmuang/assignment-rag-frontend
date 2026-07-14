@@ -29,6 +29,21 @@ describe("DocumentsPanel", () => {
     await waitFor(() => expect(screen.getAllByText("Policy").length).toBeGreaterThan(0));
   });
 
+  it("clears the success notice on its own instead of showing it forever", async () => {
+    server.use(
+      http.post(API_BASE_URL + "/ingestions/text", () => HttpResponse.json({ job_id: "job4", document_id: "d4", document_name: "Policy", status: "queued", stage: "queued", error: null }, { status: 202 })),
+      http.get(API_BASE_URL + "/ingestions/job4", () => HttpResponse.json({ job_id: "job4", document_id: "d4", document_name: "Policy", status: "processing", stage: "embedding", error: null })),
+    );
+    const user = userEvent.setup();
+    renderApp(<DocumentsPanel open onClose={() => undefined} />);
+    await user.click(screen.getByRole("tab", { name: "Add document" }));
+    await user.type(screen.getByLabelText("Document name"), "Policy");
+    await user.type(screen.getByLabelText("Content"), "Refund terms");
+    await user.click(screen.getByRole("button", { name: "Ingest document" }));
+    expect(await screen.findByText("Policy queued for ingestion.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Policy queued for ingestion.")).not.toBeInTheDocument(), { timeout: 6000 });
+  }, 10000);
+
   it("uploads a file, shows live stage progression, and completes", async () => {
     let calls = 0;
     server.use(
