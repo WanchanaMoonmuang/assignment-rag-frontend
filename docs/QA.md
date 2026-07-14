@@ -151,3 +151,95 @@ No new bugs found in this scope's diff. One coverage note, not filed as a bug (n
   `workspace-layout.spec.ts:40` ("opens the documents panel") directly exercises the rewritten
   drawer and would have been the most relevant e2e signal for this scope's responsive behavior.
   Unit/component coverage (FQA-010 through FQA-020) stands in for it this run.
+
+## 2026-07-14 — Scope C: citations, source drawer, PDF original view (branch: feat/frontend-v2-citations, commit: 862bce4)
+
+Reviewed as uncommitted working-tree changes on `feat/frontend-v2-citations`, stacked on
+`feat/frontend-v2-ingestion` (base commit `862bce4`, PR'd, not part of this review). No new
+commits between the branches (`git diff feat/frontend-v2-ingestion...feat/frontend-v2-citations`
+is empty); the actual scope diff is the uncommitted working tree, verified via
+`git diff feat/frontend-v2-ingestion` (with `git add -N .` first so new untracked files show in
+the diff): `DESIGN.md`, `src/api/client.ts`, `src/chat/ChatWorkspace.{tsx,test.tsx}` (modified),
+plus new `src/chat/citationLinks.{ts,test.ts}` and `src/citations/{types,api,SourceDrawer,
+SourceDrawer.test}.{ts,tsx}` — matches the scope description, 10 files, +410/-17.
+
+Checks: lint pass (0 errors, 1 pre-existing warning — `ChatWorkspace.tsx` line ~39
+`react-hooks/exhaustive-deps` on the `[messages]` dependency array; confirmed present, same code
+shape, on `feat/frontend-v2-ingestion`'s copy of the file — Scope A/B-triaged, not newly
+introduced), typecheck pass (`tsc -b`, no errors), vitest 46/46 passed (7 files), build pass
+(`tsc -b && vite build`; the "chunk larger than 500 kB" notice is a pre-existing bundle-size
+informational message, unrelated to this diff's ~9 KB of added source), e2e 0/4 run
+(environment-blocked, same as Scopes A/B — see Bugs).
+
+Ran under Node v20.19.2 (`nvm`/`nvm use` unavailable in this sandbox; `package.json` specifies
+`>=24 <25`) — same caveat as prior scope runs; results held but this is not a Node-24-verified run.
+Also note: this sandbox's `npm`/`npx` wrapper (an `rtk` proxy hook per global CLAUDE.md) breaks
+JSON output for `eslint`/other tool-chain calls in this project ("ESLint output (JSON parse failed:
+EOF while parsing a value...)"); worked around by invoking `./node_modules/.bin/{tsc,vitest,vite}`
+and `/usr/bin/npx eslint` directly. Flagging as an environment quirk, not a product bug.
+
+No live backend was reachable in this sandbox (expected — shut down per the task brief). Verified
+the citation-detail response contract directly against `assignment-rag-backend/app/main.py`'s
+`GET /documents/{document_id}/chunks/{chunk_id}` handler (lines 545-578) rather than trusting the
+MSW mocks' shape: `neighbors` is built from a `chunk_index` range query `[index-2, index+2]`
+inclusive of the cited chunk's own index, so in production `neighbors` genuinely contains the
+cited chunk (matching every MSW mock in this diff's tests) — `ExtractedContent` correctly finds
+its highlight target by iterating `neighbors` only and never needs the separate `chunk` field.
+This directly resolves what would otherwise be a mock-vs-contract risk on AC2.
+
+Also verified the newer `react-hooks/set-state-in-effect` lint rule (`eslint-plugin-react-hooks`
+v7.1.1, enabled via the `recommended` flat config, no `eslint-disable` anywhere in the diff)
+genuinely passes rather than being silenced: `OriginalFileViewer`'s `useEffect` only calls
+`setBlobUrl`/`setError`/`setLoading` inside `.then()`/`.catch()`/`.finally()` promise callbacks
+(async, not synchronous-in-effect-body), and both `OriginalFileViewer`/`SourceDrawerContent` avoid
+effect-driven resets entirely via `key`-based remounts (`key={source.chunk_id}` on
+`SourceDrawerContent`, fresh `OriginalFileViewer` instance per tab swap) — confirmed by reading the
+component, not just by lint passing.
+
+### Test cases
+| ID | Scenario | Steps / interaction | Expected | Actual | Status |
+| -- | -------- | ------------------- | -------- | ------ | ------ |
+| FQA-022 | `linkifyCitations` rewrites valid `[N]` markers to double-bracket markdown links, preserving the visible bracket | `citationLinks.test.ts` "turns valid citation markers into markdown links..." | `"...[1]."` → `"...[[1]](#cite-1)."` | Matched | PASS |
+| FQA-023 | `linkifyCitations` leaves out-of-range and non-numeric brackets untouched | `citationLinks.test.ts` "leaves an out-of-range marker...", "does not touch non-numeric brackets" | `[5]` with 2 sources and `[note]` both left as plain text | Matched | PASS |
+| FQA-024 | `citationIndexFromHref` round-trips `#cite-N` and rejects malformed/non-citation hrefs | `citationLinks.test.ts` `citationIndexFromHref` suite | `#cite-3`→3; `https://...`→null; `#cite-abc`/`#cite-0`→null | Matched | PASS |
+| FQA-025 | Double-bracket string transform actually renders as a visible "[1]" clickable control (not stripped to "1" by markdown) | `ChatWorkspace.test.tsx` "opens the source drawer from an inline [1] citation marker": `screen.getByRole("button", { name: "[1]" })` | A button literally named "[1]" is found and clickable | Matched — this is the render-level proof the doubled-bracket workaround in `citationLinks.ts` actually works; the unit test above only proves the string transform, this proves the rendered DOM | PASS |
+| FQA-026 (AC1) | Citations remain visible after a fresh stream completes | `ChatWorkspace.test.tsx` "opens the source drawer from an inline [1] citation marker" — `done` event fires, then `Sources (1)` found | Sources disclosure appears once streaming finishes | Matched | PASS |
+| FQA-027 (AC1) | Citations remain visible after reopening a conversation loaded from persisted history (the fixed bug) | `ChatWorkspace.test.tsx` "renders persisted citations identically and lets them be clicked after reopening a conversation": `GET /conversations/c1` returns an assistant message with `sources` and no `status` field, select it from the list | `Sources (1)` and the `[1]` inline marker render immediately, same as the live-stream case; `[1]` is clickable | Matched — confirms the `sourcesReady`→`status !== "streaming"` fix in `ChatWorkspace.tsx` genuinely closes the PRDv2 §11.3 gap (persisted messages have `status: undefined`, which is `!== "streaming"`) | PASS |
+| FQA-028 | Sources are not shown while a message is still streaming (regression risk from the `sourcesReady` removal) | Code review: `sources` SSE event only sets `message.sources`, never touches `status`; only the `done` event sets `status: undefined`; disclosure render is gated on `message.status !== "streaming"` | Mid-stream, `status` stays `"streaming"` so the gate stays false even if a `sources` event has already arrived before `done` | Sound by code reading; no test pauses mid-stream between the `sources` and `done` events to assert the disclosure is absent at that exact instant — reasoning-based coverage, not a dedicated regression test (see Bugs) | PASS (reasoning-based) |
+| FQA-029 (AC2) | Clicking an inline `[N]` marker opens the source drawer for the correct source | `ChatWorkspace.test.tsx` "opens the source drawer from an inline [1] citation marker" | Drawer opens (`Close source` control present), shows `policy.txt` | Matched | PASS |
+| FQA-030 (AC2) | Clicking a `Sources (N)` disclosure row opens the source drawer for that source | `ChatWorkspace.test.tsx` "opens the source drawer from clicking a source in the disclosure list" | Same drawer opens from the row click | Matched | PASS |
+| FQA-031 (AC2) | Source drawer highlights the exact cited chunk among its neighbors, sorted by `chunk_index` | `SourceDrawer.test.tsx` "highlights the cited chunk among its neighbors" | Cited neighbor renders inside a real `<mark>` element with `aria-label="Cited passage"`; both non-cited neighbors also render, in order | Matched; verified against the real backend contract (see run notes above) that `neighbors` includes the cited chunk in production, not just in this mock | PASS |
+| FQA-032 (AC2) | Drawer header shows document name, location label, and score | `SourceDrawer.test.tsx` "highlights the cited chunk...": `screen.getByText("Lines 10-12 · Score 0.812")` | Header string matches `location.label` + rounded score | Matched | PASS |
+| FQA-033 | Chunk-detail fetch failure falls back to the stored `snippet` with a visible warning | `SourceDrawer.test.tsx` "falls back to the stored snippet if surrounding content fails to load" (404 on the chunk-detail route) | Warning alert + `source.snippet` text shown instead of a blank/broken drawer | Matched | PASS |
+| FQA-034 (AC3) | Non-PDF source shows no "Original" tab | `SourceDrawer.test.tsx` "does not show format tabs for a non-PDF source" | No `Tabs`/`Original` tab rendered at all for `source_format: "txt"` | Matched | PASS |
+| FQA-035 (AC3) | PDF source shows an "Original" tab that bearer-fetches the file as a blob and opens it at the cited page | `SourceDrawer.test.tsx` "shows an Original tab for a PDF source...": click "Original" tab, mock `GET /documents/d1/file` returns an `application/pdf` blob | `<iframe>` appears with `src` ending in `#page=4`, matching `location.start` | Matched | PASS |
+| FQA-036 | Drawer closes via the close button | `SourceDrawer.test.tsx` "closes when the close button is clicked" | `onClose` callback fires once | Matched | PASS |
+| FQA-037 (AC4, security) | Malicious/extracted markup (`<img src=x onerror=...>`, prompt-injection-style text) in a cited chunk's content renders as inert text and never executes | `SourceDrawer.test.tsx` "renders malicious extracted content as inert text, never executable markup" | No `<img>` element in the DOM, `window.__xss` never set, the literal text "Ignore instructions" is visible as inert text | Matched — verified directly (DOM query + global flag assertion), not assumed from "same pipeline as elsewhere" | PASS |
+| FQA-038 | `apiRequestBlob` mirrors `apiRequest`'s auth/error handling for a raw-blob GET | Code review of `src/api/client.ts` `apiRequestBlob` | Bearer header attached when a token exists; non-OK triggers `parseApiError`/`handleUnauthorizedResponse` (401) before throwing; returns `response.blob()` on success | Matched | PASS |
+| FQA-039 | Object URL for the PDF blob is revoked on unmount / source change | Code review of `OriginalFileViewer`'s `useEffect` cleanup in `SourceDrawer.tsx` | `URL.revokeObjectURL` called in the cleanup function when a URL was created; effect keyed on `source.document_id` so switching sources revokes the old URL | Matched | PASS (reasoning-based; no test asserts `revokeObjectURL` was called) |
+| FQA-040 | `react-hooks/set-state-in-effect` genuinely satisfied, not silenced | Code + lint review: `OriginalFileViewer`, `SourceDrawerContent` | No `eslint-disable` in the diff; all `setState` calls in the async promise chain, not synchronous in the effect body; `npx eslint` run confirms 0 errors | Matched | PASS |
+| FQA-041 | Calculator tool activity | N/A — out of scope for Scope C (Scope D) | Not flagged, per task brief | N/A | N/A (explicitly out of scope) |
+
+### Bugs
+No new bugs found in this scope's diff. Two coverage notes, not filed as bugs (nothing broken):
+
+- **"Sources hidden while streaming" has no dedicated regression test (informational, not filed
+  as BUG-F-###)** — see FQA-028. The fix that resolves PRDv2 §11.3 (removing `sourcesReady`,
+  gating on `message.status !== "streaming"`) is correct by code reading: the `sources` SSE event
+  handler never touches `status`, so a message stays `"streaming"` until the `done` event clears
+  it, regardless of when `sources` arrives relative to `done`. But every streaming test in this
+  diff fires `conversation`→`token`→`sources`→`done` back-to-back with no pause, so none of them
+  actually assert the disclosure is absent at the instant `sources` has landed but `done` hasn't.
+  Low risk (the two events are handled independently and in the order the backend emits them,
+  same pattern as before this scope), but worth a scratch/regression test if this area changes
+  again.
+- **`URL.revokeObjectURL` call is not asserted by any test (informational, not filed as
+  BUG-F-###)** — see FQA-039. `OriginalFileViewer`'s cleanup correctly revokes the blob URL by
+  code reading, but no test mocks/spies on `URL.revokeObjectURL` or `URL.createObjectURL` to
+  confirm the create/revoke pairing actually fires on unmount or source-switch in jsdom. A
+  `vi.spyOn(URL, "revokeObjectURL")` assertion would close this gap cheaply.
+- **Playwright e2e still blocked in this sandbox** — same missing OS-level shared libraries
+  (`libnspr4`, `libnss3`, etc.) as Scopes A/B, no `sudo` available. No citation-specific e2e spec
+  exists yet (`e2e/` only has `workspace-layout.spec.ts`, unrelated to this scope), so this block
+  has no incremental impact on Scope C's own coverage beyond the pre-existing gap already logged
+  in Scope B.

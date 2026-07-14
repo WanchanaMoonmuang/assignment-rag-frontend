@@ -21,7 +21,58 @@ describe("ChatWorkspace", () => {
     await waitFor(() => expect(send).toBeEnabled());
     await user.keyboard("{Enter}");
     expect(await screen.findByText("Sources (1)")).toBeInTheDocument();
-    expect(screen.getByText(/Text excerpt: Refund within 30 days/)).toBeInTheDocument();
+    expect(screen.getByText(/Refund within 30 days/)).toBeInTheDocument();
+  });
+
+  it("opens the source drawer from an inline [1] citation marker", async () => {
+    server.use(
+      http.post(API_BASE_URL + "/chat/stream", () => new HttpResponse('event: conversation\ndata: {"conversation_id":"c1","title":"Policy"}\n\nevent: token\ndata: {"text":"Refunds take 30 days [1]."}\n\nevent: sources\ndata: [{"document_id":"d1","document_name":"policy.txt","chunk_id":"k1","snippet":"Refunds are processed within 30 days.","score":0.9,"source_format":"txt"}]\n\nevent: done\ndata: {"status":"completed"}\n\n', { headers: { "content-type": "text/event-stream" } })),
+      http.get(API_BASE_URL + "/documents/d1/chunks/k1", () => HttpResponse.json({ document_id: "d1", chunk: { chunk_id: "k1", content: "Refunds are processed within 30 days.", chunk_index: 1, location: null }, neighbors: [] })),
+    );
+    const user = userEvent.setup();
+    renderApp(<ChatWorkspace />);
+    await user.type(screen.getByRole("textbox", { name: "Question" }), "What is the refund policy?");
+    const send = screen.getByRole("button", { name: "Send message" });
+    await waitFor(() => expect(send).toBeEnabled());
+    await user.keyboard("{Enter}");
+    await screen.findByText("Sources (1)");
+    await user.click(screen.getByRole("button", { name: "[1]" }));
+    expect(await screen.findByLabelText("Close source")).toBeInTheDocument();
+    expect(screen.getAllByText("policy.txt").length).toBeGreaterThan(0);
+  });
+
+  it("opens the source drawer from clicking a source in the disclosure list", async () => {
+    server.use(
+      http.post(API_BASE_URL + "/chat/stream", () => new HttpResponse('event: conversation\ndata: {"conversation_id":"c1","title":"Policy"}\n\nevent: token\ndata: {"text":"Answer."}\n\nevent: sources\ndata: [{"document_id":"d1","document_name":"policy.txt","chunk_id":"k1","snippet":"Refunds are processed within 30 days.","score":0.9,"source_format":"txt"}]\n\nevent: done\ndata: {"status":"completed"}\n\n', { headers: { "content-type": "text/event-stream" } })),
+      http.get(API_BASE_URL + "/documents/d1/chunks/k1", () => HttpResponse.json({ document_id: "d1", chunk: { chunk_id: "k1", content: "Refunds are processed within 30 days.", chunk_index: 1, location: null }, neighbors: [] })),
+    );
+    const user = userEvent.setup();
+    renderApp(<ChatWorkspace />);
+    await user.type(screen.getByRole("textbox", { name: "Question" }), "What is the refund policy?");
+    const send = screen.getByRole("button", { name: "Send message" });
+    await waitFor(() => expect(send).toBeEnabled());
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByText("Sources (1)"));
+    await user.click(screen.getByText(/policy.txt/));
+    expect(await screen.findByLabelText("Close source")).toBeInTheDocument();
+  });
+
+  it("renders persisted citations identically and lets them be clicked after reopening a conversation", async () => {
+    server.use(
+      http.get(API_BASE_URL + "/conversations", () => HttpResponse.json({ conversations: [{ conversation_id: "c1", title: "Policy", created_at: "2026-07-01T10:00:00Z", updated_at: "2026-07-01T10:05:00Z" }] })),
+      http.get(API_BASE_URL + "/conversations/c1", () => HttpResponse.json({ conversation_id: "c1", title: "Policy", messages: [
+        { role: "user", content: "What is the refund policy?" },
+        { role: "assistant", content: "Refunds take 30 days [1].", sources: [{ document_id: "d1", document_name: "policy.txt", chunk_id: "k1", snippet: "Refunds are processed within 30 days.", score: 0.9, source_format: "txt" }] },
+      ] })),
+      http.get(API_BASE_URL + "/documents/d1/chunks/k1", () => HttpResponse.json({ document_id: "d1", chunk: { chunk_id: "k1", content: "Refunds are processed within 30 days.", chunk_index: 1, location: null }, neighbors: [] })),
+    );
+    const user = userEvent.setup();
+    renderApp(<ChatWorkspace />);
+    await user.click(await screen.findByText("Policy"));
+    expect(await screen.findByText(/Refunds take 30 days/)).toBeInTheDocument();
+    expect(await screen.findByText("Sources (1)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "[1]" }));
+    expect(await screen.findByLabelText("Close source")).toBeInTheDocument();
   });
 
   it("initializes the Top K slider from backend config default", async () => {

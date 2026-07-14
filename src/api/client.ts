@@ -110,6 +110,24 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   return (await response.json()) as T;
 }
 
+// For fetching a private binary resource (e.g. an original document file) with
+// bearer auth. Returns the raw Blob instead of parsing JSON.
+export async function apiRequestBlob(path: string): Promise<Blob> {
+  const requestHeaders = new Headers();
+  const token = authHandlers.getToken();
+  if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers: requestHeaders });
+
+  if (!response.ok) {
+    const error = await parseApiError(response);
+    if (response.status === 401) handleUnauthorizedResponse();
+    throw error;
+  }
+
+  return await response.blob();
+}
+
 // For multipart uploads. No Content-Type is set so the browser attaches its own
 // boundary; auth injection and error handling otherwise match apiRequest.
 export async function apiRequestFormData<T>(path: string, formData: FormData): Promise<T> {

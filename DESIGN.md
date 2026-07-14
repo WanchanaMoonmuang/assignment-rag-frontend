@@ -194,16 +194,41 @@ question. Never automatically retry an ambiguous or in-stream failure.
 
 ### Citations
 
-- Show citations only after the assistant response completes.
-- Use a collapsed `Sources (N)` disclosure below the answer when sources exist.
-- Each source displays the document name as the filename-equivalent title and
-  the returned `snippet` as the sentence excerpt.
-- Label location as `Text excerpt`; do not display a page number because pasted
-  text and `.txt` files are unpaginated and the API provides no page metadata.
-- Keep score, `document_id`, and `chunk_id` in an optional debug disclosure,
-  visually subordinate to the excerpt.
+- Show citations only after the assistant response completes (gated on the
+  message not currently streaming, not on a separate readiness flag — a
+  reopened/persisted message is never "streaming", so its citations render
+  immediately, identically to a freshly completed one).
+- Inline numeric markers (`[1]`, `[2]`, ...) inside the rendered Markdown
+  answer are clickable and map 1-based to the message's `sources[]` array,
+  matching the backend's prompt-numbering convention. Only markers whose
+  number is a valid source index become links; anything else (an
+  out-of-range number, non-numeric brackets) stays plain text. This is
+  implemented as a markdown-string transform before rendering (`[1]` →
+  `[[1]](#cite-1)`, so the visible bracket is preserved) plus a custom link
+  renderer that intercepts `#cite-N` hrefs — never by injecting raw HTML.
+- Also keep a collapsed `Sources (N)` disclosure below the answer when
+  sources exist; each row is clickable too and opens the same source drawer.
+  Each row shows the source's `[N]` index, document name, and `snippet`.
 - If the response has no sources, omit the source disclosure. Never create a
   citation from answer text alone.
+- Clicking a citation (inline marker or disclosure row) opens the **source
+  drawer**: a slide-over on desktop, a full-width/full-screen drawer on
+  mobile (reusing the same responsive drawer sizing as the document panel).
+  The header shows document name, the source's `location.label` (page,
+  line range, data rows, section, or record — whatever the backend
+  computed), and the retrieval score.
+- The drawer body fetches `GET /api/documents/{id}/chunks/{chunk_id}` and
+  renders the returned neighbor chunks (sorted by `chunk_index`) through the
+  same sanitized-Markdown pipeline used for chat answers — extracted
+  document content is never inserted as raw HTML. The exact cited chunk is
+  wrapped in a semantic `<mark>` element so it's visually distinguished from
+  its surrounding context. If the surrounding-content fetch fails, fall back
+  to the stored `snippet` with a visible warning rather than showing nothing.
+- For a PDF source, the drawer also shows an **Original** tab: it
+  bearer-fetches `GET /api/documents/{id}/file`, creates a temporary blob
+  URL, and displays it in an embedded viewer at `#page=N` (the cited page).
+  The blob URL is revoked when the drawer closes or a different source is
+  opened.
 
 ### Document Drawer
 
