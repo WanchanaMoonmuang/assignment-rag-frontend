@@ -24,6 +24,13 @@ describe("ChatWorkspace", () => {
     expect(screen.getByText(/Text excerpt: Refund within 30 days/)).toBeInTheDocument();
   });
 
+  it("initializes the Top K slider from backend config default", async () => {
+    server.use(http.get(API_BASE_URL + "/config", () => HttpResponse.json({ rag_top_k: { default: 7, min: 0, max: 20 }, max_upload_bytes: 20971520, supported_file_extensions: ["txt"] })));
+    renderApp(<ChatWorkspace />);
+    expect(await screen.findByText("Retrieved chunks (Top K): 7")).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: /Retrieved chunks/ })).toHaveAttribute("aria-valuenow", "7");
+  });
+
   it("restores persisted history after a stream ends early", async () => {
     server.use(
       http.post(API_BASE_URL + "/chat/stream", () => new HttpResponse('event: conversation\ndata: {"conversation_id":"c1","title":"Policy"}\n\nevent: token\ndata: {"text":"partial"}\n\n', { headers: { "content-type": "text/event-stream" } })),
