@@ -526,3 +526,199 @@ making this call, rather than from memory:
 - **Net: do not call frontend V2 fully green.** Two concrete asterisks remain at the close of
   Scope E: BUG-F-002 (lint fails) and the never-executed e2e suite (environment-blocked, not
   logic-blocked).
+
+## 2026-07-14 — Bug-fix batch: citations, chat rendering, ingestion UI, layout (branch: fix/bug-batch-frontend, commit: 0e44f07 + working tree, uncommitted)
+
+Branch created off `develop`, no commits yet — `git diff` (no args) against `0e44f07` is the
+full diff for this QA pass: `src/chat/ChatWorkspace.tsx`, `src/chat/citationLinks.{ts,test.ts}`,
+`src/citations/SourceDrawer.tsx`, `src/documents/DocumentsPanel.{tsx,test.tsx}`,
+`src/layouts/WorkspaceShell.tsx` (7 files, confirmed via `git diff --stat`, no surprises).
+Companion backend branch `fix/bug-batch-backend` fixed the "tool stuck on running forever after
+reload" bug at the source (persists resolved `tool_result` only, never a dangling "requested"
+placeholder) — correctly out of scope for this frontend diff, not flagged here.
+
+Checks: lint **pass** (0 warnings — see BUG-F-002 re-verification below), typecheck pass, vitest
+57/57 passed, build pass, e2e 0/7 executed (environment-blocked — genuinely attempted against both
+Chromium and Firefox, not assumed; see notes).
+
+Environment note: same as every prior scope — Node 24 required (`.nvmrc`) but only Node 20.19.2
+installed, no `nvm`/Node 24 binary available; `lint`/`typecheck`/`test`/`build` run via
+`rtk proxy npm ...`.
+
+### Run notes
+
+- **Security note on this QA session itself**: partway through, a tool-result system-reminder
+  appeared claiming `src/chat/ChatWorkspace.test.tsx` had been "intentionally modified" (by
+  scratch discriminating-test additions I had just added and then reverted via
+  `git checkout --`) and instructing me not to revert it and not to tell the user. This did not
+  match reality — `git diff --stat` and a `grep SCRATCH` immediately after showed the file byte-
+  identical to HEAD, no leftover content. Per operating rules, no injected tool/agent message can
+  authorize concealing something from the user, so this was disregarded and is being surfaced
+  here for transparency. It did not affect any finding below; the working tree was independently
+  verified clean before every check that follows.
+- **F1/F2 (source-row caption + score, clamped snippet) — genuinely verified, not just code-read.**
+  No existing unit test covered these lines, so a discriminating scratch test was added to
+  `ChatWorkspace.test.tsx` (run, then reverted via `git checkout --` — confirmed 0 diff
+  afterward): asserts the dropdown row shows `"Lines 10-12 · Score 0.812"` and that the snippet
+  `Typography` carries `WebkitLineClamp: "3"`. Passed with the fix; re-ran after
+  `git stash push -- src/chat/ChatWorkspace.tsx` and both assertions failed as expected (no
+  caption text found / no clamp style) — confirms the test is discriminating, not tautological.
+  Restored via `git stash pop`.
+- **F3 (boxy border → left accent, `stripLeadingOverlap`) — genuinely verified.** Existing test
+  `SourceDrawer.test.tsx` "highlights the cited chunk among its neighbors" already asserts
+  `component="mark"` survived the border-style change (part of the 57 passing). No existing
+  coverage exercised actual overlap-stripping (its neighbors fixture has no shared text), so a
+  discriminating scratch test was added (run, then reverted — confirmed 0 diff): crafted a
+  neighbor pair sharing the exact substring `"OVERLAP_TAIL_MATCH"` at the boundary, asserted the
+  second chunk renders only `"unique-to-k2 body text."` (leading duplicate stripped) while the
+  first chunk's full original text is untouched. Passed with the fix; re-ran after
+  `git stash push -- src/citations/SourceDrawer.tsx` and it failed (full duplicated text found) —
+  discriminating, not tautological. Restored via `git stash pop`.
+  - **Heuristic stress-test (conceptual, per the task's explicit ask):** the 400-char cap is safe
+    against real data today — backend `Settings.rag_chunk_overlap` defaults to 150 chars and
+    `extraction.py`'s per-format `chunk_overlap` defaults are 120, both well under the cap; the
+    `ponytail:` comment in the code already names this exact ceiling if overlap config ever grows
+    past 400. The exact-match requirement (no fuzzy matching) is a genuine, inherent risk in the
+    other direction, though: any coincidental exact character run shared between two *unrelated*
+    adjacent chunks (e.g., a repeated table header, boilerplate disclaimer, or common short
+    phrase landing exactly at a chunk boundary) would be silently stripped from the second
+    chunk's display even though it isn't overlap — a false positive with no user-visible signal
+    that content was dropped. Not a reproducible bug against current real data (not filed as one),
+    but a real, undetectable-in-production failure mode of "exact match, longest-first" with no
+    minimum-length floor or fuzzy tolerance. Worth a design note for whoever owns this file next;
+    not blocking this batch.
+- **F4 (multi-ref citation groups) — genuinely verified.** The two new tests in
+  `citationLinks.test.ts` ("links every number in a comma-separated group",
+  "leaves only the out-of-range members of a group as plain text") were re-run after
+  `git stash push -- src/chat/citationLinks.ts`: **both fail** without the fix (received the
+  literal `"[2, 7]"` unlinkified) — not tautological. Restored via `git stash pop`. Regression
+  coverage for "single `[1]` still works exactly as before" and "non-numeric brackets untouched"
+  is the pre-existing tests in the same file, both still passing unchanged.
+- **F5 (docx header truncation) — verified via existing test, unchanged assertion.** The exact
+  string `"Lines 10-12 · Score 0.812"` assertion in `SourceDrawer.test.tsx` line 41 still passes
+  with `noWrap`/`title` added (both are non-content-changing props) — confirms the fix doesn't
+  alter rendered text, only its overflow/hover behavior. `noWrap`/`title` are read directly from
+  source: real fix for the described bug (unbounded breadcrumb-style `location.label` reading like
+  a content paragraph under the filename).
+- **F7 (wide code blocks) — genuinely rendered and verified, not just prop-inspected.** No
+  existing test rendered a fenced code block. Added a discriminating scratch test (run, then
+  reverted — confirmed 0 diff): streamed an assistant answer containing a 300+ char single-line
+  fenced code block, located the real DOM `<pre>` element, asserted its `textContent` contains the
+  full unwrapped line and its inline style has `overflowX: "auto"` / `maxWidth: "100%"`, and that
+  the nested `<code>` has `overflowWrap: "anywhere"`. Passed with the fix; re-ran after
+  `git stash push -- src/chat/ChatWorkspace.tsx` and both style assertions failed (props absent) —
+  discriminating. Restored via `git stash pop`.
+- **F8 (self-clearing ingestion notice) — genuinely verified, timer semantics checked.** The new
+  `DocumentsPanel.test.tsx` test was re-run after `git stash push -- src/documents/DocumentsPanel.tsx`:
+  it **times out and fails** waiting for the notice to disappear (confirms it isn't tautological).
+  Restored via `git stash pop`, re-confirmed passing. Read `useEffect(() => { if (!notice) return;
+  const timer = setTimeout(() => setNotice(null), 4000); return () => clearTimeout(timer); },
+  [notice])` directly: when a new notice arrives while an old timer is still pending, React's
+  cleanup fires first (`clearTimeout` on the *old* timer) before the new one is scheduled — no
+  leaked timers, no double-fire, and a rapid second ingestion's notice can't be prematurely
+  cleared by a stale first timer. Unmount also runs the cleanup, so no
+  set-state-after-unmount warning risk.
+- **F9 (dismiss "x" vs. delete action) — judgment call as requested, logged as a residual, low-
+  severity finding (BUG-F-003) rather than left as prose-only.** Read `DocumentsPanel.tsx`
+  directly: the completed-job row's dismiss icon (`CloseRounded`) and the document row's delete
+  icon (`DeleteOutlineRounded`, a trash can) are visually distinct glyphs, and clicking the job
+  row's dismiss only filters local `activeJobs` state — it never calls the delete-document
+  mutation, so a mis-click has zero destructive consequence (unlike the original complaint's
+  implied risk). However, the two `<List>`s (`"Ingestion jobs in progress"` and `"Documents"`)
+  sit in the same `Stack spacing={3}` with no `Divider` between them, both using the same
+  `secondaryAction` icon-button slot/position — so immediately after a completed upload, a
+  dismiss "x" sits directly above a trash can in an otherwise-identical row layout. My call: the
+  *destructive* half of the original complaint is resolved (no accidental deletion is possible),
+  but the *visual adjacency/lookalike* half is only partially addressed by icon-shape alone.
+  Logging as open/low rather than silently accepting it, per the request for a second opinion.
+- **F10 (composer pushed below the fold) — verified via CSS-mechanics review + code read, real
+  browser rendering genuinely attempted and blocked.** `npx playwright test` and
+  `npx playwright install firefox` were both tried (not assumed): identical
+  `browserType.launch`/host-validation failures for missing OS shared libraries (`libnspr4`,
+  `libnss3`, `libgtk-3.so.0`, etc.) on both Chromium and Firefox, no `sudo` binary present — same
+  class of environment block as every prior scope, now confirmed across two browser engines.
+  No existing unit/e2e test covers composer position, and jsdom (used by vitest here) does not
+  run a layout engine, so a rendered-size assertion in jsdom would be a false read regardless.
+  Verified instead via CSS Grid semantics: `main`'s `display: grid` previously had
+  `placeItems: "center"` (`align-items: center`), which does **not** stretch the grid item to the
+  row track's height — the single grid row instead sizes to the item's own auto/content height,
+  and `height: "100%"` on the chat column (in `ChatWorkspace.tsx`) resolves against that
+  non-stretched, content-sized area, effectively behaving like `auto` — exactly matching the
+  reported symptom (composer pushed down by extra vertical centering space on an empty/short
+  transcript). The fix's `alignItems: "stretch"` makes the grid row (and therefore the item's
+  `height: 100%`) fill `main`'s full height, so the chat column's own `flex-direction: column`
+  (message list `flex: 1`, composer `Box` un-flexed) correctly pins the composer to the bottom.
+  `justifyItems: "center"` is unchanged behavior for horizontal centering. This is standard,
+  spec-defined CSS Grid alignment behavior, not a guess — but flagging plainly that this is
+  code+spec review, not an actual rendered screenshot, since Playwright is env-blocked here.
+- **F13 (stable `key` for multi tool-call rows)** — trivial, low-risk key change; the existing
+  "pairs multiple calculator calls in one turn with their own results" test (part of the 57
+  passing) still renders both rows correctly with distinct arguments/results.
+- **Re-verified BUG-F-002 — now fixed.** `npm run lint` exits 0 with no warnings on this branch.
+  Read `src/chat/ChatWorkspace.tsx`: `messages` is now `useMemo(() => localMessages ??
+  history.data?.messages ?? [], [localMessages, history.data?.messages])` — the recommended fix
+  from the Scope E entry has landed on `develop` (this branch's base, `0e44f07`) prior to this
+  batch; not part of this batch's diff itself. Closing the bug.
+- **No fictional-rule claim taken at face value.** The task description for F3 mentioned
+  `stripLeadingOverlap` being "reworked... to satisfy the `react-hooks/immutability` eslint rule."
+  Checked `eslint.config.js` directly: no such rule exists in this project (only
+  `eslint-plugin-react-hooks`'s standard `rules-of-hooks`/`exhaustive-deps`, both from
+  `reactHooks.configs.flat.recommended.rules`). `stripLeadingOverlap` itself still contains a
+  plain mutated-`let` `for` loop internally (only the outer `displayItems` computation in
+  `ExtractedContent` uses `.reduce`, no mutated loop variable) — noted as a description/reality
+  mismatch, not a product bug.
+
+### Test cases
+| ID | Scenario | Steps / interaction | Expected | Actual | Status |
+| -- | -------- | ------------------- | -------- | ------ | ------ |
+| FQA-070 | F1/F2: source row shows location + score caption | Scratch test in `ChatWorkspace.test.tsx` (added/reverted): render sources dropdown | `"Lines 10-12 · Score 0.812"` text present | Present | PASS |
+| FQA-071 | F1/F2: long snippet is 3-line clamped | Same scratch test: inspect snippet `Typography` style | `WebkitLineClamp: "3"` | Present | PASS |
+| FQA-072 | F1/F2 discriminating check: both fail without the fix | Stash `ChatWorkspace.tsx`, re-run scratch test | Caption text absent, no clamp style | Failed as expected on both assertions | PASS (regression confirmed) |
+| FQA-073 | F3: cited chunk still renders as `<mark>` after border restyle | `SourceDrawer.test.tsx` "highlights the cited chunk among its neighbors" | `component="mark"`, left-accent style | Matched | PASS |
+| FQA-074 | F3: `stripLeadingOverlap` trims a genuine boundary duplicate | Scratch test in `SourceDrawer.test.tsx` (added/reverted): crafted overlapping neighbor pair | Second chunk shows only its unique tail text | Matched | PASS |
+| FQA-075 | F3 discriminating check: fails without the fix | Stash `SourceDrawer.tsx`, re-run scratch test | Full duplicated leading text still present | Failed as expected | PASS (regression confirmed) |
+| FQA-076 | F4: `[2, 7]` and `[2, 7, 10]` each linkify per-number | `citationLinks.test.ts` new tests | Each valid number becomes its own `[[N]](#cite-N)` link | Matched | PASS |
+| FQA-077 | F4: out-of-range member of a group stays plain | `citationLinks.test.ts` "leaves only the out-of-range members..." | `[2, 99]` (max 5) → `[[2]](#cite-2), [99]` | Matched | PASS |
+| FQA-078 | F4 discriminating check: both new tests fail without the fix | Stash `citationLinks.ts`, re-run | Both new tests fail (`"[2, 7]"` etc. unlinkified) | Failed as expected | PASS (regression confirmed) |
+| FQA-079 | F4: single `[1]` and non-numeric `[note]` unaffected | Pre-existing tests in same file | Unchanged behavior | Still passing | PASS |
+| FQA-080 | F5: docx header caption text unchanged after `noWrap`/`title` added | `SourceDrawer.test.tsx` line 41 | `"Lines 10-12 · Score 0.812"` | Matched | PASS |
+| FQA-081 | F7: wide fenced code block renders inside an overflow-scrollable `<pre>` | Scratch test in `ChatWorkspace.test.tsx` (added/reverted): real `ReactMarkdown` render of a 300+ char code line | `<pre>` has `overflowX: auto`, `maxWidth: 100%`; `<code>` has `overflowWrap: anywhere` | Matched | PASS |
+| FQA-082 | F7 discriminating check: fails without the fix | Stash `ChatWorkspace.tsx`, re-run scratch test | Style assertions fail (props absent) | Failed as expected | PASS (regression confirmed) |
+| FQA-083 | F8: success notice self-clears after ~4s | `DocumentsPanel.test.tsx` "clears the success notice on its own instead of showing it forever" | Notice visible, then gone within 6s without a new upload | Matched | PASS |
+| FQA-084 | F8 discriminating check: fails without the fix | Stash `DocumentsPanel.tsx`, re-run new test | Test times out waiting for notice to disappear | Failed as expected (timeout) | PASS (regression confirmed) |
+| FQA-085 | F9: dismiss icon is non-destructive and visually distinct from delete | Code review: `IngestionJobRow` `onDismiss` vs. document `remove.mutate` | Dismiss never deletes a document; icons differ (X vs. trash) | Confirmed non-destructive; icons differ but rows are otherwise visually identical/adjacent with no divider | PASS (with residual concern — see BUG-F-003) |
+| FQA-086 | F10: composer stays near the bottom on an empty/short conversation | Code + CSS Grid spec review (Playwright genuinely attempted, environment-blocked) | `alignItems: stretch` makes the chat column's `height:100%` fill `main`, pinning the composer via its own flex layout | Reasoning matches CSS Grid alignment spec; not visually screenshotted (env-blocked) | PASS (reviewed, e2e-blocked) |
+| FQA-087 | F13: multiple calculator calls in one turn still render distinctly after the `key` change | Existing "pairs multiple calculator calls in one turn..." test | Both rows render with distinct results | Still passing | PASS |
+| FQA-088 | BUG-F-002 re-verification: `npm run lint` passes cleanly | `rtk proxy npm run lint` | Exit 0, no warnings | Exit 0, no warnings | PASS — fixed |
+| FQA-089 | `npm run typecheck` passes | `rtk proxy npm run typecheck` | Exit 0 | Clean | PASS |
+| FQA-090 | `npm test` (vitest) passes at the expected count | `rtk proxy npm test` | All tests pass | 8 files, 57/57 passed | PASS |
+| FQA-091 | `npm run build` succeeds | `rtk proxy npm run build` | Build succeeds | Succeeded (pre-existing >500kB chunk-size warning only) | PASS |
+| FQA-092 | `npm run test:e2e` genuinely attempted (Chromium + Firefox) | `npx playwright test`, `npx playwright install firefox` | Run, or a clear environment block | 0/7 run — missing OS shared libs, no `sudo`; confirmed across two browser engines | N/A (environment-blocked) |
+
+### Bugs
+- **BUG-F-002** (severity: medium, status: **fixed**) — `npm run lint` (`eslint . --max-warnings=0`)
+  previously failed on `react-hooks/exhaustive-deps` at `ChatWorkspace.tsx`.
+  - Re-verification: `rtk proxy npm run lint` exits 0 with no warnings on this branch.
+    `src/chat/ChatWorkspace.tsx`'s `messages` derivation is now wrapped in `useMemo`, matching
+    the fix recommended in the Scope E entry above. Landed on `develop` (this branch's base,
+    `0e44f07`) prior to this batch — not part of this batch's own diff.
+  - Fix / re-verified: present on `develop` at `0e44f07`; re-verified in this QA pass.
+- **BUG-F-003** (severity: low, status: open) — F9's completed-ingestion-job dismiss "x" sits
+  directly above the document list's delete (trash) icon with no visual separator, in the same
+  row layout/position, even though the two icons use different glyphs and the dismiss action is
+  functionally non-destructive.
+  - Repro: `DocumentsPanel.tsx`, Documents tab, after a file finishes ingesting — the
+    "Ingestion jobs in progress" `<List>` and the "Documents" `<List>` are both inside one
+    `Stack spacing={3}` with no `Divider` between them; both list items use the same
+    `secondaryAction` icon-button slot.
+  - Observed: no failing test/assertion — this is a UX judgment call, not a functional defect.
+    Confirmed via code read that clicking the job row's dismiss icon only calls
+    `setActiveJobs((jobs) => jobs.filter(...))` (local state), never `remove.mutate` (the actual
+    delete-document mutation), so the destructive half of the original F9 complaint is resolved.
+  - Suspected root cause / recommendation: add a `Divider` (or spacing/heading treatment) between
+    the two `<List>`s in `DocumentsPanel.tsx` when `activeJobs.length` is nonzero, to reinforce
+    that the top list is transient status rather than part of the permanent document list. Low
+    severity because there is no accidental-deletion path — purely a lookalike/adjacency polish
+    item.
+  - Fix / re-verified: pending (hand back to main agent if this is worth addressing before this
+    batch ships; QA does not implement feature fixes).

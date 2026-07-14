@@ -15,6 +15,15 @@ describe("linkifyCitations", () => {
     expect(linkifyCitations("See [5].", 2)).toBe("See [5].");
   });
 
+  it("links every number in a comma-separated group", () => {
+    expect(linkifyCitations("See [2, 7].", 10)).toBe("See [[2]](#cite-2), [[7]](#cite-7).");
+    expect(linkifyCitations("See [2, 7, 10].", 10)).toBe("See [[2]](#cite-2), [[7]](#cite-7), [[10]](#cite-10).");
+  });
+
+  it("leaves only the out-of-range members of a group as plain text", () => {
+    expect(linkifyCitations("See [2, 99].", 5)).toBe("See [[2]](#cite-2), [99].");
+  });
+
   it("leaves everything untouched when there are no sources", () => {
     expect(linkifyCitations("General knowledge [1] answer.", 0)).toBe("General knowledge [1] answer.");
   });

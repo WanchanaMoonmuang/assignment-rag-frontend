@@ -23,7 +23,7 @@ export function WorkspaceShell({ children, sidebar, title = "New conversation", 
         <Typography variant="h3" sx={{ flex: 1, minWidth: 0 }} noWrap>{title}</Typography>
         <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>{toolbarAction}<PersonOutlineRounded color="action" aria-hidden="true" /><Typography variant="body2" sx={{ display: { xs: "none", sm: "block" } }}>{username}</Typography><Button color="inherit" startIcon={<LogoutRounded />} onClick={logout}>Logout</Button></Stack>
       </Toolbar></AppBar>
-      <Box component="main" sx={{ flex: 1, minHeight: 0, display: "grid", placeItems: "center", p: { xs: 0, sm: 0 } }}>{children}</Box>
+      <Box component="main" sx={{ flex: 1, minHeight: 0, display: "grid", alignItems: "stretch", justifyItems: "center", p: { xs: 0, sm: 0 } }}>{children}</Box>
     </Box>
   </Box>;
 }
