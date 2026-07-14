@@ -1,13 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-async function openAuthenticatedWorkspace(page: import("@playwright/test").Page) {
-  await page.addInitScript(() => sessionStorage.setItem("knowledge-assistant.access-token", "visual-token"));
-  await page.route("**/api/auth/me", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ username: "admin" }) }),
-  );
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "No conversation selected" })).toBeVisible();
-}
+import { openAuthenticatedWorkspace } from "./helpers";
 
 test("shows the 280px conversation sidebar at 1024px", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });

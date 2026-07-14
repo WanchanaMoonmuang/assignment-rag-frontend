@@ -225,6 +225,7 @@ describe("ChatWorkspace", () => {
     renderApp(<ChatWorkspace />);
     await user.click(await screen.findByLabelText("Delete Policy"));
     expect(screen.getByRole("dialog")).toHaveTextContent("Delete conversation?");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByLabelText("Delete Policy")).not.toBeInTheDocument());
   });
