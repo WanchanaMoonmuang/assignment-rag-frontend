@@ -11,7 +11,7 @@ export function WorkspaceShell({ children, sidebar, title = "New conversation", 
   const { username, logout } = useAuth();
   const showSidebar = useMediaQuery("(min-width: 1024px)");
   const sidebarWidth = useMediaQuery("(min-width: 1440px)") ? 304 : 280;
-  return <Box sx={{ minHeight: "100dvh", display: "flex", bgcolor: "background.default" }}>
+  return <Box sx={{ height: "100dvh", display: "flex", bgcolor: "background.default" }}>
     <Box component="aside" sx={{ width: sidebarWidth, flexShrink: 0, display: showSidebar ? "flex" : "none", flexDirection: "column", borderRight: 1, borderColor: "divider", bgcolor: "background.paper" }}>
       <Stack direction="row" spacing={3} sx={{ height: 64, px: 5, alignItems: "center" }}><Avatar variant="rounded" sx={{ width: 32, height: 32, bgcolor: "primary.main" }}><AutoAwesomeRounded fontSize="small" aria-hidden="true" /></Avatar><Typography variant="h3">Knowledge Assistant</Typography></Stack>
       <Divider />
